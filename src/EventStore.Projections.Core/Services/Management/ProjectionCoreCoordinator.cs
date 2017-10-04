@@ -13,7 +13,8 @@ namespace EventStore.Projections.Core.Services.Management
     public class ProjectionCoreCoordinator
         : IHandle<ProjectionManagementMessage.Internal.RegularTimeout>,
         IHandle<SystemMessage.StateChangeMessage>,
-        IHandle<SystemMessage.SystemCoreReady>
+        IHandle<SystemMessage.SystemCoreReady>,
+        IHandle<SystemMessage.EpochWritten>
     {
         private readonly ILogger Log = LogManager.GetLoggerFor<ProjectionCoreCoordinator>();
         private readonly ProjectionType _runProjections;
@@ -46,39 +47,39 @@ namespace EventStore.Projections.Core.Services.Management
         }
 
         private bool _systemReady = false;
+        private bool _ready = false;
+
         private VNodeState _currentState = VNodeState.Unknown;
         private Guid _epochId = Guid.Empty;
         public void Handle(SystemMessage.SystemCoreReady message)
         {
             _systemReady = true;
             StartWhenConditionsAreMet();
+            Log.Debug("====================================== System ready!");                        
         }
 
         public void Handle(SystemMessage.StateChangeMessage message)
         {
             _currentState = message.State;
-            _epochId = GetEpochIdFromStateChange(message);
-            StartWhenConditionsAreMet();
+            if(_currentState != VNodeState.Master)
+                _ready = false;
         }
 
-        private Guid GetEpochIdFromStateChange(SystemMessage.StateChangeMessage message)
+        public void Handle(SystemMessage.EpochWritten message)
         {
-            Guid epochId = Guid.Empty;
-            switch (message.State)
-            {
-                case VNodeState.Master:
-                    epochId = ((SystemMessage.BecomeMaster)message).EpochId;
-                    break;
-                case VNodeState.Slave:
-                    epochId = ((SystemMessage.BecomeSlave)message).EpochId;
-                    break;
+            Log.Debug("====================================== Epoch Written: {0} {1}",message.Epoch.EpochId,_currentState.ToString());            
+            if(_currentState == VNodeState.Master){
+                _epochId = message.Epoch.EpochId;
+                _ready = true;
             }
-            return epochId;
+
+            StartWhenConditionsAreMet();            
         }
 
         private void StartWhenConditionsAreMet()
         {
-            if (_systemReady && (_currentState == VNodeState.Master))
+            //run if and only if these conditions are met
+            if (_systemReady && _ready)
             {
                 if (!_started)
                 {
@@ -142,6 +143,7 @@ namespace EventStore.Projections.Core.Services.Management
         {
             bus.Subscribe<SystemMessage.StateChangeMessage>(this);
             bus.Subscribe<SystemMessage.SystemCoreReady>(this);
+            bus.Subscribe<SystemMessage.EpochWritten>(this);
             if (_runProjections >= ProjectionType.System)
             {
                 bus.Subscribe<ProjectionManagementMessage.Internal.RegularTimeout>(this);

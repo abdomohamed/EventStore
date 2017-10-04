@@ -22,6 +22,7 @@ namespace EventStore.Projections.Core.Services.Management
         : IDisposable,
             IHandle<SystemMessage.StateChangeMessage>,
             IHandle<SystemMessage.SystemCoreReady>,
+            IHandle<SystemMessage.EpochWritten>,
             IHandle<ClientMessage.ReadStreamEventsBackwardCompleted>,
             IHandle<ClientMessage.ReadStreamEventsForwardCompleted>,
             IHandle<ClientMessage.WriteEventsCompleted>,
@@ -594,40 +595,40 @@ namespace EventStore.Projections.Core.Services.Management
 
         private VNodeState _currentState = VNodeState.Unknown;
         private bool _systemIsReady = false;
+        private bool _ready = false;        
         private Guid _epochId = Guid.Empty;
         public void Handle(SystemMessage.SystemCoreReady message)
         {
             _systemIsReady = true;
             StartWhenConditionsAreMet();
+            _logger.Debug("====================================== System ready!");
         }
 
         public void Handle(SystemMessage.StateChangeMessage message)
         {
             _currentState = message.State;
-            _epochId = GetEpochIdFromStateChange(message);
-            StartWhenConditionsAreMet();
+            if(_currentState != VNodeState.Master)
+                _ready = false;            
+            _logger.Debug("====================================== State change: {0}",_currentState.ToString());
         }
 
-        private Guid GetEpochIdFromStateChange(SystemMessage.StateChangeMessage message)
+        public void Handle(SystemMessage.EpochWritten message)
         {
-            Guid epochId = Guid.Empty;
-            switch (message.State)
-            {
-                case VNodeState.Master:
-                    epochId = ((SystemMessage.BecomeMaster)message).EpochId;
-                    break;
-                case VNodeState.Slave:
-                    epochId = ((SystemMessage.BecomeSlave)message).EpochId;
-                    break;
+            _logger.Debug("====================================== Epoch Written: {0} {1}",message.Epoch.EpochId,_currentState.ToString());
+            if(_currentState == VNodeState.Master){
+                _epochId = message.Epoch.EpochId;
+                _ready = true;
             }
-            return epochId;
+
+            StartWhenConditionsAreMet(); 
         }
 
         private void StartWhenConditionsAreMet()
         {
-            if (_currentState == VNodeState.Master)
+            //run if and only if these conditions are met
+            if (_systemIsReady && _ready)
             {
-                if (!_started && _systemIsReady)
+                if (!_started)
                 {
                     _logger.Debug("PROJECTIONS: Starting Projections Manager. (Node State : {0})", _currentState);
                     Start();

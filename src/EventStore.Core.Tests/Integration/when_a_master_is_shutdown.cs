@@ -16,7 +16,7 @@ namespace EventStore.Core.Tests.Integration
         protected override void BeforeNodesStart()
         {
             _nodes.ToList().ForEach(x =>
-                x.Node.MainBus.Subscribe(new AdHocHandler<SystemMessage.StateChangeMessage>(Handle)));
+                x.Node.MainBus.Subscribe(new AdHocHandler<SystemMessage.EpochUpdated>(Handle)));
             _expectedNumberOfRoleAssignments = new CountdownEvent(3);
             base.BeforeNodesStart();
         }
@@ -31,19 +31,10 @@ namespace EventStore.Core.Tests.Integration
             base.Given();
         }
 
-        private void Handle(SystemMessage.StateChangeMessage msg)
+        private void Handle(SystemMessage.EpochUpdated msg)
         {
-            switch (msg.State)
-            {
-                case Data.VNodeState.Master:
-                    _expectedNumberOfRoleAssignments?.Signal();
-                    _epochIds.Add(((SystemMessage.BecomeMaster)msg).EpochId);
-                    break;
-                case Data.VNodeState.Slave:
-                    _expectedNumberOfRoleAssignments?.Signal();
-                    _epochIds.Add(((SystemMessage.BecomeSlave)msg).EpochId);
-                    break;
-            }
+            _epochIds.Add(msg.Epoch.EpochId);
+            _expectedNumberOfRoleAssignments?.Signal();
         }
 
         [Test]
